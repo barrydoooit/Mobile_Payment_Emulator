@@ -1,0 +1,119 @@
+<html lang="en">
+
+<head>
+    <!--https://kjur.github.io/jsrsasign/jsrsasign-all-min.js-->
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"
+        integrity="sha512-bLT0Qm9VnAYZDflyKcBaQ2gg0hSYNQrJ8RilYldYQ1FxQYoCLtUjuuRuZo+fjqhx/qtq/1itJ0C2ejDxltZVFg=="
+        crossorigin="anonymous"></script>
+    <script src="lib/js/jsrsasign-all-min.js"></script>
+    <script src="lib/js/crypto-js.min.js"></script>
+    <script src="lib/js/jsencrypt.min.js"></script>
+    <script src="lib/js/md5.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale-1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+    <title>Register</title>
+</head>
+
+<body id="user-pane">
+    <div>
+        <form method="post" enctype="multipart/form-data">
+            <h1>Sign Up</h1>
+            <div class="form-item">
+                <label>Username</label>
+                <input type="text" placeholder="Username" name="username" id="username" class="text-input">
+            </div>
+            <div class="form-item">
+                <label>Password</label>
+                <input type="password" placeholder="Password" name="password" id="password" class="text-input">
+            </div>
+            <div class="form-item">
+                <label>Confirm Password</label>
+                <input type="password" placeholder="Confirm Password" name="passwordConf" id="passwordConf"
+                    class="text-input">
+            </div><button type="button" name="signup" id="signup" class="signup">Register</button></br></br>
+            private key: <div id="privkey"></div></br>
+            public key: <div id="pubkey"></div></br>
+            Signature: <div id="sig"></div></br>
+        </form>
+    </div>
+</body>
+<script>
+    $(document).ready(function () {
+        $("#signup").click(function (e) {
+            genRsaKeys(1024);
+            username = $("#username").val();
+            password = processPassword($("#password").val());
+            if ($("#password").val().localeCompare($("#passwordConf").val()) != 0) {
+                alert("password inconsistent!");
+                return;
+            }
+            $("#sig").text(sign(password, $('#privkey').text()));
+            plaintext = `{"pwd": "${password}", "userID": "${username}"}`;
+            $.ajax({
+                type: "POST",
+                url: "/register",
+                data: JSON.stringify({
+                    str: plaintext,
+                    sign: sign(plaintext, $('#privkey').text()),
+                    pubkey: $('#pubkey').text()
+                }),
+                contentType: "application/json",
+                dataType: "json",
+                success: function (data) {
+                    console.log(data);
+                    //show content
+                    alert('Success! Your id is ' + data.str);
+                    downloadToFile(data.str, 'userID.txt', 'text/palin');
+                },
+                error: function (xhr) {
+                    parsed = JSON.parse(xhr.responseText);
+                    str = parsed.str;     
+                    sig = parsed.sig;
+                    console.log(JSON.parse(str));
+                    if(varify(str, sig, $("#pubkey").text())==true){
+                        alert("Error! " + str.status);
+                    }else{
+                        alert("DO NOT TRUST! FAKE PAYMENT INFO");
+                    }             
+                    //show error message
+                }
+            });
+        });
+    });
+    function processPassword(pwd) {
+        return md5(pwd);
+    }
+    function genRsaKeys(size) {
+        var keySize = size;
+        var crypt = new JSEncrypt({ default_key_size: keySize });
+        $('#privkey').text(crypt.getPrivateKey());
+        $('#pubkey').text(crypt.getPublicKey());
+        downloadToFile($('#privkey').text(), 'user_privkey.pem', 'text/palin');
+    }
+    function sign(plain, private) {
+        // RSA signature generation
+        var sig = new KJUR.crypto.Signature({ "alg": "SHA1withRSA", prvkeypem: private });
+        sig.updateString(plain);
+        let temp = sig.sign();
+        let sign = hextob64(temp);
+        return sign;
+    }
+    function varify(plaintext, signature, pubkey) {
+        let signatureVf = new KJUR.crypto.Signature({ alg: "SHA1withRSA", prvkeypem: pubkey });
+        signatureVf.updateString(plaintext);
+        let isValid = signatureVf.verify(b64tohex(signature));
+        console.log(isValid);
+
+        return isValid;
+    }
+    const downloadToFile = (content, filename, contentType) => {
+        const a = document.createElement('a');
+        const file = new Blob([content], { type: contentType });
+        a.href = URL.createObjectURL(file);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    };</script>

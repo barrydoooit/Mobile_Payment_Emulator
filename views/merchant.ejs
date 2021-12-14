@@ -1,0 +1,139 @@
+<html lang="en">
+
+<head>
+    <!--https://kjur.github.io/jsrsasign/jsrsasign-all-min.js-->
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"
+        integrity="sha512-bLT0Qm9VnAYZDflyKcBaQ2gg0hSYNQrJ8RilYldYQ1FxQYoCLtUjuuRuZo+fjqhx/qtq/1itJ0C2ejDxltZVFg=="
+        crossorigin="anonymous"></script>
+    <script src="lib/js/jsrsasign-all-min.js"></script>
+    <script src="lib/js/crypto-js.min.js"></script>
+    <script src="lib/js/jsencrypt.min.js"></script>
+    <script src="lib/js/md5.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale-1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+    <title>Merchant</title>
+</head>
+
+<body id="user-pane">
+    <div style="margin: 10px auto;padding-left:100px;">
+        <h3>Shop Name:</h3>
+        <div id="shopname">Watsons</div>
+        <h3>Possible SQL injection attack with shopID field</h3>
+        <div>10'; DELETE FROM shops WHERE id='123</div>
+        <h3>Shop ID:</h3>
+        <div id="shopID">123</div>
+        <form>
+            <h3>Information in qrcode:</h3><textarea cols="80" rows="10" placeholder="Userinfo" name="Userinfo" id="Userinfo"
+                class="text-input"></textarea></br>
+            <h3>Price to pay:</h3><input type="text" placeholder="Price" name="Price" id="Price"
+                class="text-input"></br>
+            <button type="button" name="confirm" id="confirm">confirm</button>
+        </form>
+        <h3>Pay Status: </h3>
+        <div id="status"></div></br>
+        <h3>Get private key:</h3><input type="file" id="fileInputprv"></br>
+        <h3>Get server public key: (must be correct, for that this is offline installed in the local storage of merchant's machine)</h3><input type="file" id="fileInputpub"></br>
+        <h3>private key: </h3>
+        <div id="privkey"></div></br>
+        <h3>server public key: </h3>
+        <div id="pubkey"></div></br>
+        <h3>Signature: </h3>
+        <div id="sig"></div></br>
+    </div>
+</body>
+<script>
+    $(document).ready(function () {
+        document.getElementById('fileInputprv').addEventListener('change', function selectedFileChanged() {
+            if (this.files.length === 0) {
+                console.log('Please select file！');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function fileReadCompleted() {
+                $("#privkey").text(reader.result);
+            };
+            reader.readAsText(this.files[0]);
+        });
+        document.getElementById('fileInputpub').addEventListener('change', function selectedFileChanged() {
+            if (this.files.length === 0) {
+                console.log('Please select file！');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function fileReadCompleted() {
+                $("#pubkey").text(reader.result);
+            };
+            reader.readAsText(this.files[0]);
+        });
+
+        $("#confirm").click(function (e) {
+            plaintext = JSON.stringify({
+                shopid: $("#shopID").text(),
+                purchaser:$("#Userinfo").val(), 
+                price:$("#Price").val()
+            });
+            $("#sig").text(sign(plaintext, $('#privkey').text()));
+            console.log(plaintext);
+            $.ajax({
+                type: "POST",
+                url: "/newbill",
+                data: JSON.stringify({
+                    str: plaintext,
+                    sign: $("#sig").text()
+                }),
+                contentType: "application/json",
+                dataType: "json",
+                success: function (data) {
+                    console.log(data);
+                    sig= data.sig;
+                    str = data.str;
+                    if(varify(str, sig, $("#pubkey").text())==true){
+                        parsedStr = JSON.parse(str);
+                        $("#status").text(parsedStr.status);
+                    }else{
+                        alert("DO NOT TRUST! FAKE PAYMENT INFO");
+                    }
+                },
+                error: function (xhr) {
+                    parsed = JSON.parse(xhr.responseText);
+                    str = parsed.str;     
+                    sig = parsed.sig;
+                    console.log(JSON.parse(str));
+                    if(varify(str, sig, $("#pubkey").text())==true){
+                        alert("Error! " + (JSON.parse(str).status));
+                        $("#status").text((JSON.parse(str).status));
+                    }else{
+                        alert("DO NOT TRUST! FAKE PAYMENT INFO");
+                    }             
+                    //show error message
+                }
+            });
+
+        });
+    });
+    function genRsaKeys(size) {
+        var keySize = size;
+        var crypt = new JSEncrypt({ default_key_size: keySize });
+        $('#privkey').text(crypt.getPrivateKey());
+        $('#pubkey').text(crypt.getPublicKey());
+        //downloadToFile($('#privkey').text(), 'user_privkey.pem', 'text/palin');
+    }
+    function sign(plain, private) {
+        // RSA signature generation
+        var sig = new KJUR.crypto.Signature({ "alg": "SHA1withRSA", prvkeypem: private });
+        sig.updateString(plain);
+        let temp = sig.sign();
+        let sign = hextob64(temp);
+        return sign;
+    }
+    function varify(plaintext, signature, pubkey){
+        let signatureVf = new KJUR.crypto.Signature({alg:"SHA1withRSA",prvkeypem:pubkey});
+        signatureVf.updateString(plaintext);
+        let isValid = signatureVf.verify(b64tohex(signature));
+        console.log("response signature validation is ", isValid);
+        return isValid;
+    }
+</script>

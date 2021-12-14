@@ -1,0 +1,239 @@
+<html lang="en">
+
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"
+        integrity="sha512-bLT0Qm9VnAYZDflyKcBaQ2gg0hSYNQrJ8RilYldYQ1FxQYoCLtUjuuRuZo+fjqhx/qtq/1itJ0C2ejDxltZVFg=="
+        crossorigin="anonymous"></script>
+        
+    <script src="lib/js/jsrsasign-all-min.js"></script>
+    <script src="lib/js/crypto-js.min.js"></script>
+    <script src="lib/js/jsencrypt.min.js"></script>
+    <script src="lib/js/qrcode.min.js"></script>
+    <script src="lib/js/md5.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale-1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Payment</title>
+</head>
+
+<body>
+    <div style="margin: 10px auto;padding-left:100px;">
+        <h3>UserID File:</h3><input type="file" id="fileInputUID"></br>
+        <h3>User Key File:</h3><input type="file" id="fileInputKey"></br>
+        <h3>Server Key File: (must be correct, for that this is validated by digital certificate)</h3><input type="file" id="fileInputpub"></br>
+        <form id="payform" style="display:none">
+            <h3 class="form-title">Bill Detail</h3>
+            <div id="bill"></div>
+            <div class="form-item">
+                <h3>Password</h3>
+                <input type="text" placeholder="Password" name="Password" id="password" class="text-input">
+            </div>
+            <button type="button" name="pay" id="pay">Pay</button>
+        </form>
+        <h3>private Key:</h3>
+        <div id="privkey"></div>
+        <h3>User ID:</h3>
+        <div id="UID"></div>
+        <h3>Server Key:</h3>
+        <div id="pubkey"></div>
+        <button type="button" name="get-qrcode" id="get-qrcode">get qrcode</button>
+        <button type="button" name="get-qrcode-offline" id="get-qrcode-offline">get qrcode offline</button>
+        <a download="qrcode.png">
+            <div id="qrcode" style="margin:15px;"></div>
+        </a>
+        <h3>QRcode string:</h3>
+        <p id="qrstring" style="width: 1000px; "></p>
+        <h3>Signature:</h3>
+        <p id="sig" style="width: 1000px; "></p>
+        
+    </div>
+
+</body>
+
+</html>
+<script>
+    $(document).ready(function () {
+        privKey = '';
+        document.getElementById('fileInputKey').addEventListener('change', function selectedFileChanged() {
+            if (this.files.length === 0) {
+                console.log('Please select file！');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function fileReadCompleted() {
+                privKey = reader.result;
+                console.log(reader.result);
+                $("#privkey").text(privKey);
+            };
+            
+            reader.readAsText(this.files[0]);
+        });
+        document.getElementById('fileInputUID').addEventListener('change', function selectedFileChanged() {
+            if (this.files.length === 0) {
+                console.log('Please select file！');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function fileReadCompleted() {
+                UID = reader.result;
+                $("#UID").text(UID);
+            };
+            reader.readAsText(this.files[0]);
+        });
+        document.getElementById('fileInputpub').addEventListener('change', function selectedFileChanged() {
+            if (this.files.length === 0) {
+                console.log('Please select file！');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function fileReadCompleted() {
+                 pubkey= reader.result;
+                $("#pubkey").text(pubkey);
+            };
+            reader.readAsText(this.files[0]);
+        });
+
+        $("#pay").click(function (e) {
+            password = md5($("#password").val());
+            plaintext = `{"pwd": "${encrypt(password)}", "userID": "${$("#UID").text()}", "time": ${+new Date()}}`;
+            
+            $.ajax({
+                type: "POST",
+                url: "/pay",
+                data: JSON.stringify({
+                    str: plaintext,
+                    sig: sign(plaintext, privKey),
+                }),
+                contentType: "application/json",
+                dataType: "json",
+                success: function (data) {
+                    sig= data.sig;
+                    str = data.str;
+                    if(varify(str, sig, $("#pubkey").text())==true){
+                        parsedStr = JSON.parse(str);
+                        $("#bill").text($("#bill").text()+' -----PAID!');
+                    }else{
+                        alert("DO NOT TRUST! FAKE PAYMENT INFO");
+                    }
+                },
+                error: function (xhr) {
+                    parsed = JSON.parse(xhr.responseText);
+                    str = parsed.str;
+                    sig = parsed.sig;                
+                    if(varify(str, sig, $("#pubkey").text())==true){
+                        parsedStr = JSON.parse(str);
+                        $("#bill").text($("#bill").text()+' -----PAY FAILED!');
+                        alert("Error! " + JSON.parse(parsed.str).status);
+                    }else{
+                        alert("DO NOT TRUST! FAKE PAYMENT INFO");
+                    }
+                }
+            });
+        });
+        var qrcode = new QRCode(document.getElementById("qrcode"), {
+            width: 200,
+            height: 200
+        });
+
+        function makeCode() {
+            console.log("Making code...");
+            envuid = encrypt($("#UID").text());
+            console.log(envuid);      
+            var signedtext = sign(envuid,  $("#privkey").text());
+            let codeInfo = JSON.stringify({
+                userID: envuid,
+                sig: signedtext
+            });
+            cyphertext = codeInfo;
+            qrcode.makeCode(codeInfo);
+            $("#qrstring").text(cyphertext);
+        }
+        $("#get-qrcode-offline").on("click", function (){
+            envuid = encrypt($("#UID").text());
+            console.log(envuid);
+            plaintext = JSON.stringify({
+                userID: envuid,
+                time: +new Date(),
+            });
+            var signedtext = sign(plaintext ,  $("#privkey").text());
+            let codeInfo = JSON.stringify({
+                str: plaintext,
+                sig: signedtext
+            });
+            cyphertext = codeInfo;
+            qrcode.makeCode(codeInfo);
+            $("#qrstring").text(cyphertext);
+        });
+        $("#get-qrcode").on("click", function () {
+            makeCode();$("#payform").css('display', 'none');
+            plaintext = `{"userID": "${$("#UID").text()}", "time": "${+new Date()}"}`;
+            signedtext = sign(plaintext,  $("#privkey").text());
+            $("#sig").text(sig);
+            billinfo = $.ajax({
+                type: "POST",
+                url: "/bill",
+                contentType: "application/json",
+                data: JSON.stringify({
+                    str: plaintext,
+                    sign: signedtext
+                }),             
+                dataType: "json",
+                success: function (data) {
+                    //get Bill
+                    sig = data.sig;
+                    str = data.str;
+                    console.log(str);
+                    console.log(sig);
+                    if(varify(str, sig, $("#pubkey").text())==true){
+                        parsedStr = JSON.parse(str);
+                        $("#payform").css('display', 'block');
+                        $("#bill").text(`Pay HKD ${parsedStr.amount} to ID-${parsedStr.shopid} ${parsedStr.shopname}`);
+                    }else{
+                        alert("DO NOT TRUST! FAKE PAYMENT INFO");
+                    }
+                },
+                error: function (xhr) {
+                    parsed = JSON.parse(xhr.responseText);
+                    str = parsed.str;     
+                    sig = parsed.sig;
+                    if(varify(str, sig, $("#pubkey").text())==true){
+                        alert("Error! " + JSON.parse(str).status);
+                    }else{
+                        alert("DO NOT TRUST! FAKE PAYMENT INFO");
+                    }             
+                    //show error message
+                }
+            });
+        });
+    });
+    function sign(plain, private) {
+        // RSA signature generation
+        var sig = new KJUR.crypto.Signature({ "alg": "SHA1withRSA", prvkeypem: private });
+        sig.updateString(plain);
+        let temp = sig.sign();
+        let sign = hextob64(temp);
+        return sign;
+    }
+    function varify(plaintext, signature, pubkey){
+        let signatureVf = new KJUR.crypto.Signature({alg:"SHA1withRSA",prvkeypem:pubkey});
+        signatureVf.updateString(plaintext);
+        let isValid = signatureVf.verify(b64tohex(signature));
+        console.log("response signature validation is ", isValid);
+        return isValid;
+    }
+    function encrypt(plain) {   
+        //this should be stored in the client side       
+        keyobj = KEYUTIL.getKey($("#pubkey").text());
+        encrypted = KJUR.crypto.Cipher.encrypt(plain, keyobj);
+        return encrypted;        
+    }
+
+    const downloadToFile = (content, filename, contentType) => {
+        const a = document.createElement('a');
+        const file = new Blob([content], { type: contentType });
+        a.href = URL.createObjectURL(file);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    };
+</script>
